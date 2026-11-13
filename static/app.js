@@ -2,8 +2,9 @@ const $=id=>document.getElementById(id), form=$('taskForm');let csrf='',tasks=[]
 function key(d){return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')}
 function local(s){return new Date(s+'T12:00:00')}
 function shift(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}
-function notice(s){$('notice').textContent=s}
-async function api(url,method='GET',body){let r=await fetch(url,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(r.status===401?'Sign in required':r.status===400?'Check task details and duration':'Request failed: '+r.status);return r.json()}
+function notice(s,error=false){$('notice').textContent=s;$('notice').classList.toggle('error',error)}
+const logo=$('brandLogo');function showLogo(){if(logo.naturalWidth){logo.hidden=false;$('brandFallback').hidden=true}}logo.addEventListener('load',showLogo);showLogo();
+async function api(url,method='GET',body){let r=await fetch(url,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(r.status===401?(url==='/login'?'Incorrect username or password':'Sign in required'):r.status===400?'Check task details and duration':'Request failed: '+r.status);return r.json()}
 function el(tag,text,cls){let e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
 function loadDay(s){return tasks.filter(t=>t.day===s)}
 function total(ts){return ts.reduce((a,t)=>a+t.minutes+t.travel,0)}
@@ -23,6 +24,6 @@ $('mode').onchange=mode;$('add').onclick=()=>edit();$('cancel').onclick=$('calen
 function move(n){if(week){selected=key(shift(local(selected),7*n));cursor=local(selected)}else{cursor=new Date(cursor.getFullYear(),cursor.getMonth()+n,1);selected=key(cursor)}render()}
 $('prev').onclick=()=>move(-1);$('next').onclick=()=>move(1);$('today').onclick=()=>{cursor=new Date();selected=key(cursor);render()};$('view').onclick=()=>{week=!week;$('view').textContent=week?'Month':'Week';render()};
 async function enter(){let s=await api('/session');if(!s.auth)return;csrf=s.csrf;$('login').hidden=true;$('app').hidden=false;holidays=await fetch('/static/holidays.json').then(r=>r.json());await refresh()}
-$('loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/login','POST',Object.fromEntries(new FormData(e.target)));e.target.reset();await enter();notice('Signed in')}catch(e){notice(e.message)}};
+$('loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/login','POST',Object.fromEntries(new FormData(e.target)));e.target.reset();await enter();notice('Signed in')}catch(e){notice(e.message,true)}};
 $('logout').onclick=async()=>{try{await api('/logout','POST');location.reload()}catch(e){notice(e.message)}};
 enter().catch(e=>notice(e.message));window.addEventListener('focus',()=>{if(!$('app').hidden)refresh().catch(e=>notice(e.message))});if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
