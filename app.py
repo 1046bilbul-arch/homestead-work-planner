@@ -4,6 +4,12 @@ from functools import wraps
 from flask import Flask, request, session, jsonify, render_template, abort, Response
 from werkzeug.security import check_password_hash
 app=Flask(__name__)
+@app.get('/sw.js')
+def service_worker():
+    r=app.send_static_file('sw.js')
+    r.headers['Service-Worker-Allowed']='/'
+    return r
+
 app.secret_key=os.environ['PLANNER_SECRET']
 app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict', MAX_CONTENT_LENGTH=65536)
 DB=os.environ.get('PLANNER_DB','data/planner.sqlite')
@@ -34,6 +40,7 @@ def state(): return jsonify(auth=bool(session.get('auth')),csrf=session.get('csr
 @app.post('/login')
 def login():
     p=request.get_json()
+    if not isinstance(p,dict): abort(400)
     if p.get('username')!=os.environ.get('PLANNER_USER','admin') or not check_password_hash(os.environ['PLANNER_PASSWORD_HASH'],str(p.get('password',''))): abort(401)
     session.clear()
     session.update(auth=True,csrf=secrets.token_hex(32))
@@ -48,6 +55,7 @@ def logout():
 def tasks():
     with db() as c: return jsonify([dict(r) for r in c.execute('SELECT * FROM tasks ORDER BY day,start,id')])
 def validate(p):
+    if not isinstance(p,dict): raise ValueError('Invalid task')
     name=str(p.get('name','')).strip()
     if not name or len(name)>200: raise ValueError('Task name required')
     day=p.get('day') or ''
