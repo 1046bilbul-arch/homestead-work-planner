@@ -25,4 +25,4 @@ $('prev').onclick=()=>move(-1);$('next').onclick=()=>move(1);$('today').onclick=
 async function enter(){let s=await api('/session');if(!s.auth)return;csrf=s.csrf;$('login').hidden=true;$('app').hidden=false;holidays=await fetch('/static/holidays.json').then(r=>r.json());await refresh()}
 $('loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/login','POST',Object.fromEntries(new FormData(e.target)));e.target.reset();await enter();notice('Signed in')}catch(e){notice(e.message)}};
 $('logout').onclick=async()=>{try{await api('/logout','POST');location.reload()}catch(e){notice(e.message)}};
-enter().catch(e=>notice(e.message));window.addEventListener('focus',()=>{if(!$('app').hidden)refresh().catch(e=>notice(e.message))});if('serviceWorker'in navigator)navigator.serviceWorker.register('/static/sw.js').catch(()=>{});
+enter().catch(e=>notice(e.message));window.addEventListener('focus',()=>{if(!$('app').hidden)refresh().catch(e=>notice(e.message))});if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
