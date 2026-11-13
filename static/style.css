@@ -32,3 +32,6 @@ nav button{font-size:11px;padding:5px 2px;height:36px;white-space:nowrap;box-sha
 #notice{font-size:12px;padding:4px 10px;min-height:0}
 #calendar h3{font-size:14px}#summary p{font-size:12px;margin:6px 0}
 }
+
+/* Equal-height navigation and toolbar controls, including wrapped mobile labels. */
+nav,.toolbar{align-items:stretch}nav button,.toolbar button{height:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;line-height:1.15;text-align:center;padding-block:4px}.toolbar h2{align-self:center;margin-block:0}@media(max-width:600px){nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}nav button{width:100%;min-width:0;font-size:12px;padding-inline:3px}}
