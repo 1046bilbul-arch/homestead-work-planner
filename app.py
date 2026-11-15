@@ -20,6 +20,8 @@ def db():
     return c
 with db() as c:
     c.execute('CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY, name TEXT NOT NULL, detail TEXT, day TEXT, minutes INTEGER NOT NULL, start TEXT, finish TEXT, comments TEXT, customer TEXT, location TEXT, status TEXT, priority TEXT, travel INTEGER DEFAULT 0)')
+    if 'end_day' not in [r[1] for r in c.execute('PRAGMA table_info(tasks)')]:
+        c.execute("ALTER TABLE tasks ADD COLUMN end_day TEXT DEFAULT ''")
 def protected(f):
     @wraps(f)
     def wrapped(*a,**k):
@@ -60,6 +62,10 @@ def validate(p):
     if not name or len(name)>200: raise ValueError('Task name required')
     day=p.get('day') or ''
     if day: date.fromisoformat(day)
+    end_day=p.get('end_day') or day
+    if end_day:
+        date.fromisoformat(end_day)
+        if not day or end_day < day: raise ValueError('Invalid date range')
     start=p.get('start') or ''
     finish=p.get('finish') or ''
     if start or finish:
@@ -71,7 +77,7 @@ def validate(p):
     status=p.get('status','Planned')
     priority=p.get('priority','Normal')
     if status not in ('Planned','In progress','Completed','Postponed') or priority not in ('Normal','High','Urgent'): raise ValueError('Invalid status')
-    return (name,str(p.get('detail','')),day,minutes,start,finish,str(p.get('comments','')),str(p.get('customer','')),str(p.get('location','')),status,priority,travel)
+    return (name,str(p.get('detail','')),day,minutes,start,finish,str(p.get('comments','')),str(p.get('customer','')),str(p.get('location','')),status,priority,travel,end_day)
 @app.route('/api/tasks',methods=['POST'])
 @app.route('/api/tasks/<int:id>',methods=['PUT','DELETE'])
 @protected
@@ -83,14 +89,70 @@ def save(id=None):
             try: v=validate(request.get_json())
             except (ValueError,TypeError,KeyError,OverflowError): return jsonify(error='Check task date, name and duration'),400
             if id is None:
-                id=c.execute('INSERT INTO tasks(name,detail,day,minutes,start,finish,comments,customer,location,status,priority,travel) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',v).lastrowid
-            elif not c.execute('UPDATE tasks SET name=?,detail=?,day=?,minutes=?,start=?,finish=?,comments=?,customer=?,location=?,status=?,priority=?,travel=? WHERE id=?',(*v,id)).rowcount: abort(404)
+                id=c.execute('INSERT INTO tasks(name,detail,day,minutes,start,finish,comments,customer,location,status,priority,travel,end_day) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',v).lastrowid
+            elif not c.execute('UPDATE tasks SET name=?,detail=?,day=?,minutes=?,start=?,finish=?,comments=?,customer=?,location=?,status=?,priority=?,travel=?,end_day=? WHERE id=?',(*v,id)).rowcount: abort(404)
     return jsonify(id=id)
 @app.get('/api/export')
 @protected
 def export():
     with db() as c: rows=c.execute('SELECT * FROM tasks').fetchall()
     out=io.StringIO(); w=csv.writer(out)
-    w.writerow(['id','name','detail','day','minutes','start','finish','comments','customer','location','status','priority','travel'])
+    w.writerow(['id','name','detail','day','minutes','start','finish','comments','customer','location','status','priority','travel','end_day'])
     for r in rows: w.writerow([("'"+v if isinstance(v,str) and v.startswith(('=','+','-','@','\t','\r')) else v) for v in r])
     return Response(out.getvalue(),mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=work-planner.csv'})
+
+@app.get('/api/calendar.pdf')
+@protected
+def calendar_pdf():
+    from calendar import monthrange
+    from datetime import timedelta
+    from xml.sax.saxutils import escape
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, A3, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    try:
+        d=date.fromisoformat(request.args.get('day',date.today().isoformat()))
+    except ValueError:
+        abort(400)
+    monthly=request.args.get('period')=='month'
+    full=request.args.get('detail','full')=='full'
+    first=d.replace(day=1) if monthly else d-timedelta(days=d.weekday())
+    count=monthrange(d.year,d.month)[1] if monthly else 7
+    paper=A3 if request.args.get('paper')=='A3' else A4
+    size=landscape(paper) if monthly else paper
+    out=io.BytesIO()
+    doc=SimpleDocTemplate(out,pagesize=size,rightMargin=32,leftMargin=32,topMargin=32,bottomMargin=36)
+    styles=getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Job',fontSize=11,leading=15,spaceAfter=6))
+    styles.add(ParagraphStyle(name='DayBlock',fontSize=12,leading=16,textColor=colors.white))
+    def para(s,style='Job'):
+        return Paragraph(escape(str(s)).replace('\\n','<br/>'),styles[style])
+    with db() as c:
+        rows=[dict(r) for r in c.execute("SELECT * FROM tasks WHERE day<>'' AND day<=? AND COALESCE(NULLIF(end_day,''),day)>=? ORDER BY day,start,id",(str(first+timedelta(days=count-1)),str(first)))]
+    title=first.strftime('%B %Y') if monthly else first.strftime('%d %b %Y')+' – '+(first+timedelta(days=6)).strftime('%d %b %Y')
+    story=[para('HOMESTEAD | WORK PLANNER','Title'),para(title,'Heading2')]
+    for i in range(count):
+        day=first+timedelta(days=i)
+        heading=Table([[para(day.strftime('%A %d %B'),'DayBlock')]],colWidths=[doc.width])
+        heading.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#303438')),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
+        heading.keepWithNext=True
+        story.append(heading)
+        jobs=[r for r in rows if r['day']<=str(day)<=(r['end_day'] or r['day'])]
+        if not jobs: story.append(para('No scheduled work'))
+        for r in jobs:
+            story.append(Paragraph('<b>'+escape(r['name'])+'</b>',styles['Job']))
+            timing=(r['start']+' – '+r['finish']) if r['start'] else f"{r['minutes']/60:g} h"
+            story.append(para(' | '.join(filter(None,[timing,r['customer'],r['location'],r['status'],r['priority']]))))
+            if full:
+                for label,k in [('Details','detail'),('Comments','comments')]:
+                    if r[k]: story.append(para(label+': '+r[k]))
+                if r['travel']: story.append(para(f"Travel: {r['travel']/60:g} h"))
+            story.append(Spacer(1,5))
+        story.append(Spacer(1,10))
+    def footer(canvas,doc):
+        canvas.setFont('Helvetica',9)
+        canvas.drawString(32,20,'Homestead Smart Solutions | Simple. Control.')
+        canvas.drawRightString(size[0]-32,20,str(doc.page))
+    doc.build(story,onFirstPage=footer,onLaterPages=footer)
+    return Response(out.getvalue(),mimetype='application/pdf',headers={'Content-Disposition':f'attachment; filename=planner-{first}.pdf'})
